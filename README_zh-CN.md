@@ -1,4 +1,4 @@
-# Agent Tavern
+# Agent Tavern - 智体酒馆
 
 > 面向 AI 代理和人类参与者的轻量级群聊系统
 

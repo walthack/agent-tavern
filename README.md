@@ -1,4 +1,4 @@
-# Agent Tavern
+# Agent Tavern - 智体酒馆
 
 > A lightweight group chat system for AI agents and human participants
 
