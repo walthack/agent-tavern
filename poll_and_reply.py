@@ -30,7 +30,6 @@ import json
 import os
 import re
 import sys
-import tempfile
 import time
 import urllib.request
 import urllib.error
@@ -47,12 +46,13 @@ HUB_URL = os.environ.get("CHAT_HUB_URL", "http://localhost:7700")
 ROOM_ID = os.environ.get("CHAT_ROOM_ID", "")
 COOLDOWN_S = int(os.environ.get("COOLDOWN_S", "30"))
 MAX_CONTEXT = int(os.environ.get("MAX_CONTEXT", "8"))
+CONVERSATION_WINDOW = int(os.environ.get("CONVERSATION_WINDOW", "120"))  # seconds for follow-up detection
 
 LLM_API_URL = os.environ.get("LLM_API_URL", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5:4b")
 
-STATE_DIR = os.environ.get("STATE_DIR", tempfile.gettempdir())
+STATE_DIR = os.environ.get("STATE_DIR", "/tmp")
 STATE_FILE = os.path.join(STATE_DIR, f"tavern_{AGENT_NAME}_state.json")
 
 # ========== Persona resolution ==========
@@ -190,16 +190,49 @@ if extra:
         AGENT_ALIASES.add(a.strip().lower())
 
 
-def should_reply(msg: dict, state: dict) -> bool:
+# Follow-up keywords indicating the user is clarifying/answering the agent's message
+FOLLOWUP_KEYWORDS = ["我是问你", "我说的是", "不是，", "笨", "我是说", "我问的是", "who asked you", "i asked you", "我说的", "我的意思是"]
+
+
+def should_reply(msg: dict, state: dict, all_messages: list[dict] | None = None) -> bool:
     sender = msg.get("sender", "")
     content = msg.get("content", "")
     mentions = [m.lower() for m in msg.get("mentions", [])]
     msg_id = msg.get("id", "")
+    ts = msg.get("ts", 0)
 
     if sender.lower() in AGENT_ALIASES or sender.lower() == "agent":
         return False
     if msg_id in state.get("processed", []):
         return False
+
+    # ---- Conversation Continuation Detection ----
+    # If the agent spoke recently (within CONVERSATION_WINDOW) and the same person
+    # sends a follow-up (no @mention needed), treat it as continuation.
+    if all_messages:
+        now = time.time()
+        my_recent_ts = None
+        for m in all_messages:
+            s = m.get("sender", "").lower()
+            if s in AGENT_ALIASES or s == "agent" or s == AGENT_NAME.lower():
+                my_recent_ts = m.get("ts", 0)
+                break
+        if my_recent_ts and (now - my_recent_ts) < CONVERSATION_WINDOW:
+            # Check if this is a follow-up from someone who spoke before/around the agent
+            followup_keyword_found = any(kw in content for kw in FOLLOWUP_KEYWORDS)
+            if followup_keyword_found:
+                print(f"CONTINUATION: follow-up keyword match → {sender}")
+                return True
+            # Same sender as a recent message after agent's reply → likely continuation
+            if my_recent_ts:
+                for m in all_messages:
+                    if m.get("sender", "").lower() == sender.lower() and m.get("ts", 0) > my_recent_ts:
+                        # This person already responded after agent spoke (probably a mistake)
+                        pass
+                    elif m.get("sender", "").lower() == sender.lower() and m.get("ts", 0) < my_recent_ts:
+                        # This person was in convo with agent before agent replied
+                        print(f"CONTINUATION: same sender in conversation window → {sender}")
+                        return True
     # Check @mentions
     if "all" in mentions:
         return True
@@ -291,7 +324,7 @@ def main():
     # Find target message
     target = None
     for m in reversed(messages):
-        if should_reply(m, state):
+        if should_reply(m, state, messages):
             target = m
             break
 
@@ -301,11 +334,21 @@ def main():
 
     # ========== Gatekeeper: SPEAK/SILENT pre-check ==========
     # Direct @mention of this agent → always speak (skip gatekeeper)
+    is_continuation = False
+    try:
+        is_continuation = any(
+            m.get("sender", "").lower() in AGENT_ALIASES
+            for m in messages
+            if m.get("ts", 0) and (time.time() - m.get("ts", 0)) < CONVERSATION_WINDOW
+        )
+    except Exception:
+        pass
+
     # @all or name-in-content → ask LLM whether to speak or stay silent
     target_mentions = [m.lower() for m in target.get("mentions", [])]
     directly_mentioned = any(alias in target_mentions for alias in AGENT_ALIASES)
 
-    if not directly_mentioned:
+    if not directly_mentioned and not is_continuation:
         gate_prompt = (
             f"You are {AGENT_NAME} in a group chat. A new message arrived:\n"
             f"[{target.get('sender','')}]: {target.get('content','')[:300]}\n\n"

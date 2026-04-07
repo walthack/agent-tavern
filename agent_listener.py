@@ -45,6 +45,10 @@ HEARTBEAT_S = int(os.environ.get("HEARTBEAT_S", "30"))
 RECONNECT_BASE_S = int(os.environ.get("RECONNECT_BASE_S", "2"))
 RECONNECT_MAX_S = int(os.environ.get("RECONNECT_MAX_S", "60"))
 
+# Conversation continuation detection
+CONVERSATION_WINDOW = int(os.environ.get("CONVERSATION_WINDOW", "120"))  # seconds
+FOLLOWUP_KEYWORDS = ["我是问你", "我说的是", "不是，", "笨", "我是说", "我问的是", "who asked you", "i asked you", "我说的", "我的意思是"]
+
 LLM_API_URL = os.environ.get("LLM_API_URL", "")
 LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
 LLM_MODEL = os.environ.get("LLM_MODEL", "qwen3.5:4b")
@@ -243,6 +247,57 @@ def log(msg: str):
 # ========== Core handler ==========
 
 
+def check_continuation(msg_data: dict, state: dict) -> bool:
+    """
+    Check if this message is a continuation of the agent's recent conversation.
+    Returns True if the agent should treat this as a follow-up and skip gatekeeper.
+    """
+    now = time.time()
+    content = msg_data.get("content", "")
+    sender = msg_data.get("sender", "")
+
+    # Follow-up keyword check
+    followup_keyword_found = any(kw in content for kw in FOLLOWUP_KEYWORDS)
+
+    # Fetch recent messages to check conversation context
+    try:
+        recent = hub_get(f"/api/rooms/{ROOM_ID}/messages?limit={MAX_CONTEXT}")
+    except Exception:
+        return False
+
+    if not recent:
+        return False
+
+    # Find agent's most recent message timestamp
+    my_recent_ts = None
+    for m in recent:
+        s = m.get("sender", "").lower()
+        if s in AGENT_ALIASES or s == "agent" or s == AGENT_NAME.lower():
+            my_recent_ts = m.get("ts", 0)
+            break
+
+    if not my_recent_ts or (now - my_recent_ts) > CONVERSATION_WINDOW:
+        return False
+
+    # Check if this sender was in the conversation before agent's recent reply
+    sender_was_active = False
+    for m in recent:
+        if m.get("sender", "").lower() == sender.lower() and m.get("ts", 0) < my_recent_ts:
+            sender_was_active = True
+            break
+
+    if followup_keyword_found and sender_was_active:
+        log(f"CONTINUATION: follow-up keyword + active sender → {sender}")
+        return True
+
+    if sender_was_active and (now - my_recent_ts) < CONVERSATION_WINDOW:
+        # Same sender was talking to agent within window
+        log(f"CONTINUATION: same sender in conversation window → {sender}")
+        return True
+
+    return False
+
+
 async def handle_message(msg_data: dict, state: dict):
     """Process an incoming message from WebSocket."""
     msg_id = msg_data.get("id", "")
@@ -257,11 +312,13 @@ async def handle_message(msg_data: dict, state: dict):
         save_state(state)
         return
 
-    response_type = should_respond(msg_data)
-    if response_type is None:
+    # Check for conversation continuation (skip should_respond/gatekeeper if True)
+    is_continuation = check_continuation(msg_data, state)
+    response_type = None if is_continuation else should_respond(msg_data)
+    if response_type is None and not is_continuation:
         return
 
-    # Gatekeeper for indirect mentions
+    # Gatekeeper for indirect mentions (skip if continuation)
     if response_type == "indirect":
         if not gatekeeper(msg_data):
             log(f"gatekeeper: SILENT for {msg_id[:8]}")
