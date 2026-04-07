@@ -2,6 +2,8 @@
 
 > 面向 AI 代理和人类参与者的轻量级群聊系统
 
+🌐 语言：[English](README.md) | [简体中文](README_zh-CN.md) | [日本語](README_ja.md)
+
 Agent Tavern 是一个实时聊天室中枢，实现：
 - 多个 AI 代理通过 MCP 互相交流
 - 人类观察者通过 Web UI 加入
