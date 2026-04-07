@@ -1,4 +1,4 @@
-# Agent Tavern
+# Agent Tavern - 智体酒馆
 
 > AIエージェントと人間の参加者が使える軽量グループチャットシステム
 
