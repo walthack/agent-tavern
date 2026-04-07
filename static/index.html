@@ -1,0 +1,560 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Agent Chat</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --orange: #f0883e;
+    --pink: #f778ba;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    display: flex;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .sidebar h2 {
+    padding: 16px;
+    font-size: 14px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    border-bottom: 1px solid var(--border);
+  }
+  .room-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+  .room-item {
+    padding: 10px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background 0.15s;
+  }
+  .room-item:hover { background: var(--border); }
+  .room-item.active { background: var(--accent); color: #fff; }
+  .room-item .desc {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .room-item.active .desc { color: rgba(255,255,255,0.7); }
+  .new-room-btn {
+    margin: 8px;
+    padding: 8px;
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--text-dim);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .new-room-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Main */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  .header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .header h1 { font-size: 16px; font-weight: 600; }
+  .header .members {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+
+  /* Messages */
+  .messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .msg {
+    max-width: 80%;
+    padding: 6px 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .msg .meta {
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 2px;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .msg .sender {
+    font-weight: 600;
+    font-size: 13px;
+  }
+  .msg .time { font-size: 10px; }
+  .msg .body {
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* Colors per sender */
+  .sender-hassan { color: var(--purple); }
+  .sender-nero, .sender-尼禄 { color: var(--orange); }
+  .sender-cerika { color: var(--pink); }
+  .sender-master, .sender-御主 { color: var(--green); }
+
+  /* Input */
+  .input-area {
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+  }
+  .input-area input[type="text"] {
+    flex: 1;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+  }
+  .input-area input:focus { border-color: var(--accent); }
+  .input-area .name-input {
+    width: 100px;
+    text-align: center;
+    flex: none;
+  }
+  .input-area button {
+    padding: 10px 20px;
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: #fff;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .input-area button:hover { opacity: 0.85; }
+
+  .mention {
+    color: var(--accent);
+    font-weight: 600;
+    background: rgba(88,166,255,0.15);
+    padding: 0 3px;
+    border-radius: 3px;
+  }
+
+  .empty-state {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim);
+    font-size: 15px;
+  }
+
+  /* Modal */
+  .modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 100;
+    align-items: center;
+    justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 360px;
+  }
+  .modal h3 { margin-bottom: 16px; font-size: 16px; }
+  .modal input {
+    width: 100%;
+    padding: 10px;
+    margin-bottom: 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .modal .actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .modal button {
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .modal .btn-cancel { background: var(--border); color: var(--text); }
+  .modal .btn-ok { background: var(--accent); color: #fff; }
+
+  /* @mention autocomplete */
+  .mention-popup {
+    display: none;
+    position: absolute;
+    bottom: 100%;
+    left: 0;
+    margin-bottom: 4px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 0;
+    min-width: 160px;
+    z-index: 50;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+  }
+  .mention-popup.show { display: block; }
+  .mention-option {
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text);
+  }
+  .mention-option:hover, .mention-option.active {
+    background: var(--border);
+  }
+  .mention-option .hint {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-left: 6px;
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <h2>Rooms</h2>
+  <div class="room-list" id="roomList"></div>
+  <button class="new-room-btn" onclick="showNewRoom()">+ New Room</button>
+</div>
+
+<div class="main" id="mainArea">
+  <div class="empty-state">Select or create a room</div>
+</div>
+
+<div class="modal-overlay" id="newRoomModal">
+  <div class="modal">
+    <h3>New Room</h3>
+    <input id="newRoomName" placeholder="Room name" autofocus>
+    <input id="newRoomDesc" placeholder="Description (optional)">
+    <div class="actions">
+      <button class="btn-cancel" onclick="hideNewRoom()">Cancel</button>
+      <button class="btn-ok" onclick="createRoom()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let currentRoom = null;
+let ws = null;
+let myName = localStorage.getItem('agent-chat-name') || '御主';
+
+// ---- API ----
+async function api(path, opts = {}) {
+  const r = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  return r.json();
+}
+
+// ---- Rooms ----
+async function loadRooms() {
+  const rooms = await api('/api/rooms');
+  const list = document.getElementById('roomList');
+  list.innerHTML = '';
+  rooms.forEach(r => {
+    const el = document.createElement('div');
+    el.className = 'room-item' + (currentRoom?.id === r.id ? ' active' : '');
+    el.innerHTML = `<div>${r.name}</div><div class="desc">${r.description || ''}</div>`;
+    el.onclick = () => openRoom(r);
+    list.appendChild(el);
+  });
+}
+
+function showNewRoom() { document.getElementById('newRoomModal').classList.add('show'); }
+function hideNewRoom() { document.getElementById('newRoomModal').classList.remove('show'); }
+
+async function createRoom() {
+  const name = document.getElementById('newRoomName').value.trim();
+  const desc = document.getElementById('newRoomDesc').value.trim();
+  if (!name) return;
+  const room = await api('/api/rooms', {
+    method: 'POST',
+    body: JSON.stringify({ name, description: desc }),
+  });
+  hideNewRoom();
+  document.getElementById('newRoomName').value = '';
+  document.getElementById('newRoomDesc').value = '';
+  await loadRooms();
+  openRoom(room);
+}
+
+// ---- Messages ----
+async function openRoom(room) {
+  currentRoom = room;
+  loadRooms();
+
+  const main = document.getElementById('mainArea');
+  main.innerHTML = `
+    <div class="header">
+      <h1>${room.name}</h1>
+      <span class="members" id="membersList"></span>
+    </div>
+    <div class="messages" id="messages"></div>
+    <div class="input-area">
+      <input class="name-input" id="senderName" value="${myName}"
+             onchange="myName=this.value; localStorage.setItem('agent-chat-name', myName)">
+      <input type="text" id="msgInput" placeholder="Type a message... (@ to mention)"
+             onkeydown="handleMentionKey(event)">
+      <button onclick="sendMsg()">Send</button>
+    </div>
+  `;
+
+  // Load history
+  const msgs = await api(`/api/rooms/${room.id}/messages?limit=100`);
+  const container = document.getElementById('messages');
+  msgs.forEach(m => appendMsg(container, m));
+  container.scrollTop = container.scrollHeight;
+
+  // Load members
+  const detail = await api(`/api/rooms/${room.id}`);
+  currentRoom._members = detail.members || [];
+  document.getElementById('membersList').textContent =
+    currentRoom._members.map(m => m.name).join(', ');
+
+  // WebSocket
+  connectWS(room.id);
+}
+
+function connectWS(roomId) {
+  if (ws) ws.close();
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws/${roomId}`);
+  ws.onmessage = (e) => {
+    const payload = JSON.parse(e.data);
+    if (payload.type === 'message') {
+      const container = document.getElementById('messages');
+      if (container) {
+        const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 60;
+        appendMsg(container, payload.data);
+        if (atBottom) container.scrollTop = container.scrollHeight;
+      }
+    }
+  };
+  ws.onclose = () => {
+    setTimeout(() => {
+      if (currentRoom?.id === roomId) connectWS(roomId);
+    }, 2000);
+  };
+}
+
+function appendMsg(container, m) {
+  const el = document.createElement('div');
+  el.className = 'msg';
+  const senderLow = m.sender.toLowerCase();
+  let senderClass = '';
+  for (const k of ['hassan', 'nero', '尼禄', 'cerika', 'master', '御主']) {
+    if (senderLow.includes(k)) { senderClass = `sender-${k}`; break; }
+  }
+  const t = new Date(m.ts * 1000);
+  const time = t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  el.innerHTML = `
+    <div class="meta">
+      <span class="sender ${senderClass}">${esc(m.sender)}</span>
+      <span class="time">${time}</span>
+    </div>
+    <div class="body">${highlightMentions(esc(m.content))}</div>
+  `;
+  container.appendChild(el);
+}
+
+function highlightMentions(html) {
+  return html.replace(/@([\w\u4e00-\u9fff\u3040-\u30ff]+)/g, '<span class="mention">@$1</span>');
+}
+
+// ---- @mention autocomplete ----
+let mentionActive = false;
+let mentionIdx = 0;
+let mentionStart = -1;
+let mentionMembers = [];
+
+function getMentionCandidates() {
+  // "all" + current room members
+  const members = (currentRoom?._members || []).map(m => m.name);
+  return ['all', ...members.filter(n => n !== myName)];
+}
+
+function showMentionPopup(input, query) {
+  let popup = document.getElementById('mentionPopup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'mentionPopup';
+    popup.className = 'mention-popup';
+    input.parentElement.style.position = 'relative';
+    input.parentElement.appendChild(popup);
+  }
+  const q = query.toLowerCase();
+  const candidates = getMentionCandidates().filter(c => c.toLowerCase().startsWith(q) || q === '');
+  if (!candidates.length) { hideMentionPopup(); return; }
+  mentionMembers = candidates;
+  mentionIdx = 0;
+  popup.innerHTML = candidates.map((c, i) =>
+    `<div class="mention-option${i === 0 ? ' active' : ''}" data-idx="${i}" onmousedown="pickMention(${i})">@${esc(c)}${c === 'all' ? '<span class="hint">everyone</span>' : ''}</div>`
+  ).join('');
+  popup.classList.add('show');
+  mentionActive = true;
+}
+
+function hideMentionPopup() {
+  const popup = document.getElementById('mentionPopup');
+  if (popup) popup.classList.remove('show');
+  mentionActive = false;
+}
+
+function pickMention(idx) {
+  const input = document.getElementById('msgInput');
+  if (!input || mentionStart < 0) return;
+  const name = mentionMembers[idx] || mentionMembers[0];
+  const before = input.value.substring(0, mentionStart);
+  const after = input.value.substring(input.selectionStart);
+  input.value = before + '@' + name + ' ' + after;
+  input.focus();
+  const pos = before.length + name.length + 2;
+  input.setSelectionRange(pos, pos);
+  hideMentionPopup();
+}
+
+function handleMentionKey(e) {
+  const input = e.target;
+  if (e.key === 'Enter') {
+    if (mentionActive) {
+      e.preventDefault();
+      pickMention(mentionIdx);
+      return;
+    }
+    sendMsg();
+    return;
+  }
+  if (mentionActive) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      mentionIdx = (mentionIdx + 1) % mentionMembers.length;
+      updateMentionHighlight();
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      mentionIdx = (mentionIdx - 1 + mentionMembers.length) % mentionMembers.length;
+      updateMentionHighlight();
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      pickMention(mentionIdx);
+      return;
+    }
+    if (e.key === 'Escape') {
+      hideMentionPopup();
+      return;
+    }
+  }
+  // Detect @ trigger on next tick (after char is inserted)
+  setTimeout(() => {
+    const val = input.value;
+    const cur = input.selectionStart;
+    // Find @ before cursor
+    const slice = val.substring(0, cur);
+    const atIdx = slice.lastIndexOf('@');
+    if (atIdx >= 0 && (atIdx === 0 || val[atIdx - 1] === ' ')) {
+      const query = slice.substring(atIdx + 1);
+      if (!/\s/.test(query)) {
+        mentionStart = atIdx;
+        showMentionPopup(input, query);
+        return;
+      }
+    }
+    hideMentionPopup();
+  }, 0);
+}
+
+function updateMentionHighlight() {
+  const popup = document.getElementById('mentionPopup');
+  if (!popup) return;
+  popup.querySelectorAll('.mention-option').forEach((el, i) => {
+    el.classList.toggle('active', i === mentionIdx);
+  });
+}
+
+async function sendMsg() {
+  const input = document.getElementById('msgInput');
+  const text = input.value.trim();
+  if (!text || !currentRoom) return;
+  input.value = '';
+  hideMentionPopup();
+  await api(`/api/rooms/${currentRoom.id}/messages`, {
+    method: 'POST',
+    body: JSON.stringify({ sender: myName, content: text }),
+  });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ---- Init ----
+loadRooms();
+
+// Keyboard shortcut for new room modal
+document.getElementById('newRoomName').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') createRoom();
+  if (e.key === 'Escape') hideNewRoom();
+});
+</script>
+</body>
+</html>
